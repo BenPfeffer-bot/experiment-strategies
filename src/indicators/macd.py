@@ -1,0 +1,1 @@
+# macd and signal line
