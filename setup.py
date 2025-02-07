@@ -10,6 +10,12 @@ setup(
         "matplotlib",
         "seaborn",
         "yfinance",
+        "scikit-learn",
+        "scipy",
+        "torch",
+        "gymnasium",
+        "stable-baselines3",
+        "stable-baselines3[extra]",
     ],
     python_requires=">=3.7",
 )

@@ -3,7 +3,7 @@ This module implements a Fibonacci Trailing Stop indicator inspired by LuxAlgo.
 It calculates swing pivots over a given window (L, R), obtains Fibonacci-adjusted
 levels based on the last two pivots, and then computes a trailing stop (st) which
 switches direction according to the trigger price (either close or wick).
-  
+
 License: Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)
 https://creativecommons.org/licenses/by-nc-sa/4.0/
 """
@@ -14,9 +14,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.utils.config import MARKET_DATA_DIR, TICKERS, FIGURES_DIR
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+
+from src.utils.config import MARKET_DATA_DIR, TICKERS, FIGURES_DIR, RAW_DATA_DIR
+
 
 # --------------------------
 # Helper functions for pivots
@@ -28,8 +32,9 @@ def is_pivot_high(idx, L, R, highs):
     """
     if idx < L or idx > len(highs) - R - 1:
         return False
-    window = highs[idx - L: idx + R + 1]
+    window = highs[idx - L : idx + R + 1]
     return highs[idx] == max(window)
+
 
 def is_pivot_low(idx, L, R, lows):
     """
@@ -38,8 +43,9 @@ def is_pivot_low(idx, L, R, lows):
     """
     if idx < L or idx > len(lows) - R - 1:
         return False
-    window = lows[idx - L: idx + R + 1]
+    window = lows[idx - L : idx + R + 1]
     return lows[idx] == min(window)
+
 
 # --------------------------
 # Data structures for pivots
@@ -53,19 +59,21 @@ class Pivot:
         self.price = price
         self.direction = direction
 
+
 # --------------------------
 # Main Indicator Class
 # --------------------------
 class FibonacciTrailingStop:
-    def __init__(self,
-                 L=20,
-                 R=1,
-                 use_labels=False,   # labelling not plotted in this Python version
-                 F=-0.382,           # Default Fibonacci level when use_f is False
-                 use_f=False,        # if True use f parameter, else use F.
-                 f=1.618,            # alternative Fibonacci multiplier when use_f is True
-                 trigger='close'     # 'close' or 'wick' (if 'wick', use high in uptrend, low in downtrend).
-                 ):
+    def __init__(
+        self,
+        L=20,
+        R=1,
+        use_labels=False,  # labelling not plotted in this Python version
+        F=-0.382,  # Default Fibonacci level when use_f is False
+        use_f=False,  # if True use f parameter, else use F.
+        f=1.618,  # alternative Fibonacci multiplier when use_f is True
+        trigger="close",  # 'close' or 'wick' (if 'wick', use high in uptrend, low in downtrend).
+    ):
         """
         Parameters:
           L : int
@@ -88,21 +96,21 @@ class FibonacciTrailingStop:
         # For secondary (fill) pivots, use half windows as in Pine code.
         self.Ls = max(1, math.ceil(L / 2))
         self.Rs = max(1, math.ceil(R / 2))
-        
+
         self.use_labels = use_labels
         self.iF = f if use_f else F
         self.trigger = trigger.lower()
-        
+
         # Internal storage of pivots (most recent first)
         self.pivots = []
-    
+
     def compute(self, df):
         """
         Compute Fibonacci Trailing Stop and related levels.
-        
+
         Parameters:
           df: pd.DataFrame with at least columns: 'high', 'low', 'close'
-          
+
         Returns:
           A DataFrame with columns:
             st: Trailing Stop line.
@@ -113,21 +121,21 @@ class FibonacciTrailingStop:
         st_series = np.full(n_bars, np.nan)
         other_side_series = np.full(n_bars, np.nan)
         dir_series = np.zeros(n_bars, dtype=int)
-        
+
         # Initialize variables:
         # Current direction (0 = undefined, 1 = uptrend, -1 = downtrend)
-        direction = 0  
+        direction = 0
         # Initialize trailing stop with the first bar's close value.
-        st = df['close'].iloc[0]
+        st = df["close"].iloc[0]
         # Initialize swing maximum and minimum with first bar's high/low.
-        swing_max = df['high'].iloc[0]
-        swing_min = df['low'].iloc[0]
+        swing_max = df["high"].iloc[0]
+        swing_min = df["low"].iloc[0]
         other_side = st  # initial other side
-        
-        highs = df['high'].values
-        lows = df['low'].values
-        closes = df['close'].values
-        
+
+        highs = df["high"].values
+        lows = df["low"].values
+        closes = df["close"].values
+
         # For secondary pivot detection using half-window, precompute arrays:
         ph_small = np.full(n_bars, np.nan)
         pl_small = np.full(n_bars, np.nan)
@@ -136,7 +144,7 @@ class FibonacciTrailingStop:
                 ph_small[i] = highs[i]
             if is_pivot_low(i, self.Ls, self.Rs, lows):
                 pl_small[i] = lows[i]
-        
+
         # Loop over bars
         for t in range(n_bars):
             # Check for confirmed pivots using full window (L, R)
@@ -159,7 +167,7 @@ class FibonacciTrailingStop:
                         pass
                 else:
                     self.pivots.insert(0, Pivot(pivot_bar, pivot_price, 1))
-                    
+
             if is_pivot_low(t, self.L, self.R, lows):
                 # For a low pivot, confirmed pivot bar is t - R.
                 pivot_bar = t - self.R
@@ -175,7 +183,7 @@ class FibonacciTrailingStop:
                         pass
                 else:
                     self.pivots.insert(0, Pivot(pivot_bar, pivot_price, -1))
-            
+
             # Only proceed if we have at least two pivots
             if len(self.pivots) >= 2:
                 # Use the two most recent pivots
@@ -191,13 +199,13 @@ class FibonacciTrailingStop:
                 # Adjust the extrema by the Fibonacci factor.
                 current_max_adj = current_max + diff * self.iF
                 current_min_adj = current_min - diff * self.iF
-                
+
                 # Determine swing direction from the pivot order:
                 # If the most recent pivot is lower than the previous, d becomes negative (down swing), else positive.
                 d = -diff if p0.price < p1.price else diff
-                
+
                 # Determine which price to use as the trigger.
-                if self.trigger == 'close':
+                if self.trigger == "close":
                     price = closes[t]
                 else:
                     # 'wick' mode: use high in uptrend, low in downtrend,
@@ -208,7 +216,7 @@ class FibonacciTrailingStop:
                         price = lows[t]
                     else:
                         price = closes[t]
-                
+
                 # Update trailing stop based on current direction and price action.
                 if direction < 1:
                     if price > st:
@@ -222,7 +230,7 @@ class FibonacciTrailingStop:
                         direction = -1
                     else:
                         st = max(st, current_min_adj)
-                
+
                 # Update "other_side" using secondary pivot values if available from ph_small/pl_small.
                 ph_val = ph_small[t] if not np.isnan(ph_small[t]) else None
                 pl_val = pl_small[t] if not np.isnan(pl_small[t]) else None
@@ -236,42 +244,56 @@ class FibonacciTrailingStop:
                         other_side = max(other_side, pl_val, st)
                     else:
                         other_side = max(other_side, st)
-            
+
             # Store computed values for this bar.
             st_series[t] = st
             other_side_series[t] = other_side
             dir_series[t] = direction
-        
+
         # Build a results DataFrame (indexed same as df)
-        results = pd.DataFrame({
-            'st': st_series,
-            'other_side': other_side_series,
-            'dir': dir_series
-        }, index=df.index)
+        results = pd.DataFrame(
+            {"st": st_series, "other_side": other_side_series, "dir": dir_series},
+            index=df.index,
+        )
         return results
 
-    def plot_and_save(self, df, computed, filename='fibonacci_trailing_stop.png'):
+    def plot_and_save(self, df, computed, filename="fibonacci_trailing_stop.png"):
         """
         Plot the price series (close) along with the trailing stop and other side.
-        
+
         Parameters:
           df: pd.DataFrame containing OHLC data.
           computed: DataFrame returned from compute().
           filename: str, output filename for the image.
         """
         plt.figure(figsize=(12, 6))
-        plt.plot(df.index, df['close'], label='Close Price', color='black', linewidth=1.5)
-        plt.plot(computed.index, computed['st'], label='Fib Trailing Stop', color='teal', linewidth=2)
-        plt.plot(computed.index, computed['other_side'], label='Other Side', color='orange', linestyle='--')
-        plt.title('Fibonacci Trailing Stop Indicator')
-        plt.xlabel('Date')
-        plt.ylabel('Price')
+        plt.plot(
+            df.index, df["close"], label="Close Price", color="black", linewidth=1.5
+        )
+        plt.plot(
+            computed.index,
+            computed["st"],
+            label="Fib Trailing Stop",
+            color="teal",
+            linewidth=2,
+        )
+        plt.plot(
+            computed.index,
+            computed["other_side"],
+            label="Other Side",
+            color="orange",
+            linestyle="--",
+        )
+        plt.title("Fibonacci Trailing Stop Indicator")
+        plt.xlabel("Date")
+        plt.ylabel("Price")
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
         plt.savefig(filename)
         plt.close()
         print(f"Plot saved as {filename}")
+
 
 # --------------------------
 # Example usage
@@ -282,26 +304,34 @@ if __name__ == "__main__":
     # dates = pd.date_range(start="2023-01-01", periods=300, freq="D")
     # # Create a simple random walk for close prices.
     for ticker in TICKERS:
-        prices = pd.read_csv(f"{MARKET_DATA_DIR}/{ticker}_data.csv")['Close']
+        prices = pd.read_csv(f"{RAW_DATA_DIR}/{ticker}_data.csv")["Close"]
         dates = prices.index
         close = prices
         # Create high and low as offsets from close.
         high = close + (np.random.rand(len(dates)) * 2)
         low = close - (np.random.rand(len(dates)) * 2)
-        df_sample = pd.DataFrame({'close': close, 'high': high, 'low': low}, index=dates)
-        
+        df_sample = pd.DataFrame(
+            {"close": close, "high": high, "low": low}, index=dates
+        )
+
         # Instantiate the Fibonacci Trailing Stop indicator
-        fib_stop = FibonacciTrailingStop(L=20, R=1, use_labels=False, F=-0.382, use_f=False, trigger='close')
-        
+        fib_stop = FibonacciTrailingStop(
+            L=20, R=1, use_labels=False, F=-0.382, use_f=False, trigger="close"
+        )
+
         # Compute the indicator
         results = fib_stop.compute(df_sample)
-        
+
         if not os.path.exists(f"{FIGURES_DIR}/fibonacci"):
             os.makedirs(f"{FIGURES_DIR}/fibonacci")
-            
+
         # Plot and save the result
-        fib_stop.plot_and_save(df_sample, results, filename=f"{FIGURES_DIR}/fibonacci/{ticker}_fibonacci_trailing_stop.png")
-            
+        fib_stop.plot_and_save(
+            df_sample,
+            results,
+            filename=f"{FIGURES_DIR}/fibonacci/{ticker}_fibonacci_trailing_stop.png",
+        )
+
     # Print sample output for the last 5 bars.
     # print("Date       |  ST       | Other Side | Direction")
     # for d, row in results.tail(5).iterrows():

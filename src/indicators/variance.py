@@ -9,7 +9,7 @@ sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-from src.utils.config import MARKET_DATA_DIR, TICKERS, FIGURES_DIR
+from src.utils.config import MARKET_DATA_DIR, TICKERS, FIGURES_DIR, RAW_DATA_DIR
 
 
 def compute_variance(
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     try:
         for ticker in TICKERS:
             # Assume each ticker has a CSV file with at least a 'Close' column
-            data_path = os.path.join(MARKET_DATA_DIR, f"{ticker}_data.csv")
+            data_path = os.path.join(RAW_DATA_DIR, f"{ticker}_data.csv")
             df = pd.read_csv(data_path)
             # Ensure DataFrame index as dates. Adjust if CSV contains a Date column.
             df.index = pd.to_datetime(df.index)

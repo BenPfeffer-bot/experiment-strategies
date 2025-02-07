@@ -11,3 +11,7 @@ venv/
 *.pyc
 *.pyo
 *.DS_Store
+
+mlruns/
+experiments/
+logs/

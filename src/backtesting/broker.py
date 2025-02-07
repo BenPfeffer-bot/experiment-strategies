@@ -62,14 +62,17 @@ class SimulatedBroker:
         self.balance += proceeds
 
         trade = {
-            "ticker": ticker,
-            "size": position["size"],
-            "entry_price": position["entry_price"],
-            "exit_price": exit_price,
             "entry_date": position["entry_date"],
+            "entry_price": position["entry_price"],
+            "position": 1,  # Assuming long positions only
+            "size": position["size"],
             "exit_date": date,
+            "exit_price": exit_price,
             "pnl": pnl,
+            "pnl_pct": (pnl / position["cost"]) * 100,
             "balance": self.balance,
+            "cost": position["cost"],
+            "ticker": ticker,
             "side": "sell",
         }
 

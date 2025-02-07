@@ -75,17 +75,22 @@ def main():
                 # Format trades for JSON
                 formatted_trades = []
                 for trade in trade_log:
-                    formatted_trade = {
-                        "entry_date": trade["entry_date"].strftime("%Y-%m-%d %H:%M:%S"),
-                        "entry_price": float(trade["entry_price"]),
-                        "position": 1,  # Assuming long positions only
-                        "size": float(trade["size"]),
-                        "exit_date": trade["exit_date"].strftime("%Y-%m-%d %H:%M:%S"),
-                        "exit_price": float(trade["exit_price"]),
-                        "pnl": float(trade["pnl"]),
-                        "pnl_pct": float(trade["pnl"] / trade["cost"] * 100),
-                    }
-                    formatted_trades.append(formatted_trade)
+                    if trade["side"] == "sell":  # Only include completed trades
+                        formatted_trade = {
+                            "entry_date": trade["entry_date"].strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
+                            "entry_price": float(trade["entry_price"]),
+                            "position": trade["position"],
+                            "size": float(trade["size"]),
+                            "exit_date": trade["exit_date"].strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
+                            "exit_price": float(trade["exit_price"]),
+                            "pnl": float(trade["pnl"]),
+                            "pnl_pct": float(trade["pnl_pct"]),
+                        }
+                        formatted_trades.append(formatted_trade)
 
                 # Calculate additional metrics
                 winning_trades = sum(1 for t in formatted_trades if t["pnl"] > 0)
