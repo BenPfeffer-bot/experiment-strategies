@@ -1,8 +1,17 @@
 """
-This module implements a Moving Average indicator with forecasting capabilities.
-Inspired by LuxAlgos MACD-Based Price Forecasting indicator, this code uses a simple
-moving average for trend determination and stores recent deviations from an initial
-price to forecast upper, mid, and lower price levels using percentile-based interpolation.
+Enhanced Moving Average Indicator with Forecasting
+
+This module implements an advanced Moving Average indicator with forecasting capabilities.
+It supports multiple types of moving averages (SMA, EMA, WMA) and provides price level
+forecasting using percentile-based interpolation of historical deviations.
+
+Features:
+- Multiple MA types (Simple, Exponential, Weighted)
+- Price level forecasting
+- Trend detection and analysis
+- Adaptive memory management
+- Signal generation
+- Advanced visualization
 
 License: Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)
 https://creativecommons.org/licenses/by-nc-sa/4.0/
@@ -10,303 +19,483 @@ https://creativecommons.org/licenses/by-nc-sa/4.0/
 
 import sys
 import os
+from typing import Dict, List, Optional, Tuple, Union, Literal
+from dataclasses import dataclass
+import logging
+from datetime import datetime
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from enum import Enum
 
 sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
 from src.utils.config import FIGURES_DIR, TICKERS, RAW_DATA_DIR
 
 
+class MAType(Enum):
+    """Types of Moving Averages"""
+
+    SIMPLE = "simple"
+    EXPONENTIAL = "exponential"
+    WEIGHTED = "weighted"
+
+
+@dataclass
+class MAParameters:
+    """Parameters for Moving Average calculation"""
+
+    window: int = 20
+    ma_type: MAType = MAType.SIMPLE
+    price_column: str = "close"
+    max_memory: int = 50
+    forecast_length: int = 100
+    up_percentile: float = 80
+    mid_percentile: float = 50
+    down_percentile: float = 20
+    signal_threshold: float = 0.02  # 2% threshold for signal generation
+
+
+@dataclass
+class ForecastLevels:
+    """Container for forecast price levels"""
+
+    upper: float
+    mid: float
+    lower: float
+    confidence: float  # Confidence score based on memory size and consistency
+
+
+@dataclass
+class MAResult:
+    """Container for Moving Average calculation results"""
+
+    ma: pd.Series
+    trend: pd.Series
+    forecasts: pd.DataFrame
+    signals: pd.Series
+
+
 class MovingAverageForecast:
-    def __init__(
-        self,
-        window=20,
-        max_memory=50,
-        forecast_length=100,
-        up_per=80,
-        mid_per=50,
-        dn_per=20,
-    ):
+    """
+    Enhanced Moving Average Indicator Implementation.
+
+    This indicator computes various types of moving averages and provides
+    price forecasting based on trend analysis and historical deviations.
+
+    Features:
+    - Multiple MA types (SMA, EMA, WMA)
+    - Trend detection
+    - Price level forecasting
+    - Signal generation
+    - Memory-based learning
+
+    Attributes:
+        params (MAParameters): Configuration parameters
+        logger (logging.Logger): Logger instance
+        results (Optional[MAResult]): Computed results
+    """
+
+    def __init__(self, params: Optional[MAParameters] = None):
         """
-        Initialize the indicator.
+        Initialize Moving Average indicator with given parameters.
 
-        Parameters:
-        • window : int
-            Length of the moving average window.
-        • max_memory : int
-            Maximum number of deviation samples to keep for each trend.
-        • forecast_length : int
-            The horizon over which to forecast (this parameter is available for future expansion).
-        • up_per : float
-            Upper forecast percentile.
-        • mid_per : float
-            Mid (median/average) forecast percentile.
-        • dn_per : float
-            Lower forecast percentile.
+        Args:
+            params: Optional[MAParameters]
+                Parameters for MA calculation. If None, uses default values.
         """
-        self.window = window
+        self.params = params if params else MAParameters()
+        self._validate_parameters()
 
-        self.max_memory = max_memory
-        self.forecast_length = forecast_length
-        self.up_per = up_per
-        self.mid_per = mid_per
-        self.dn_per = dn_per
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
 
-        # Memory to store deltas for uptrend and downtrend respectively.
+        # Initialize results container
+        self.results: Optional[MAResult] = None
+
+        # Initialize memory containers
         self.memory = {"up": [], "down": []}
-        # Initial reference prices for each trend; these update at trend-change points.
-        self.uptrend_init_price = None
-        self.downtrend_init_price = None
+        self.trend_prices = {"up": None, "down": None}
 
-    def _update_memory(self, trend, current_price, init_price):
+    def _validate_parameters(self) -> None:
+        """Validate Moving Average parameters."""
+        if self.params.window < 2:
+            raise ValueError("window must be at least 2")
+        if self.params.max_memory < self.params.window:
+            raise ValueError("max_memory must be at least as large as window")
+        if not 0 <= self.params.up_percentile <= 100:
+            raise ValueError("up_percentile must be between 0 and 100")
+        if not 0 <= self.params.down_percentile <= 100:
+            raise ValueError("down_percentile must be between 0 and 100")
+        if not 0 <= self.params.mid_percentile <= 100:
+            raise ValueError("mid_percentile must be between 0 and 100")
+        if self.params.down_percentile >= self.params.mid_percentile:
+            raise ValueError("down_percentile must be less than mid_percentile")
+        if self.params.mid_percentile >= self.params.up_percentile:
+            raise ValueError("mid_percentile must be less than up_percentile")
+
+    def _compute_ma(self, data: pd.Series) -> pd.Series:
         """
-        Update the memory for a given trend.
+        Compute moving average based on specified type.
 
-        Parameters:
-        • trend : str
-            Either 'up' or 'down'.
-        • current_price : float
-            Current price value.
-        • init_price : float
-            The reference price at the time the current trend started.
+        Args:
+            data: pd.Series
+                Price data
 
         Returns:
-        The updated memory list for the trend.
+            pd.Series containing the moving average values
         """
-        delta = current_price - init_price
+        if self.params.ma_type == MAType.SIMPLE:
+            return data.rolling(window=self.params.window, min_periods=1).mean()
+        elif self.params.ma_type == MAType.EXPONENTIAL:
+            return data.ewm(span=self.params.window, adjust=False).mean()
+        else:  # Weighted
+            weights = np.arange(1, self.params.window + 1)
+            return data.rolling(window=self.params.window, min_periods=1).apply(
+                lambda x: np.sum(weights * x) / np.sum(weights)
+            )
+
+    def _update_memory(self, trend: str, price: float, ref_price: float) -> None:
+        """
+        Update trend memory with new price deviation.
+
+        Args:
+            trend: str
+                Current trend ('up' or 'down')
+            price: float
+                Current price
+            ref_price: float
+                Reference price for deviation calculation
+        """
+        delta = price - ref_price
         self.memory[trend].append(delta)
-        # Maintain the memory length
-        if len(self.memory[trend]) > self.max_memory:
+
+        # Maintain memory size
+        if len(self.memory[trend]) > self.params.max_memory:
             self.memory[trend].pop(0)
-        return self.memory[trend]
 
-    def _compute_forecast_levels(self, init_price, mem_deltas):
+    def _compute_forecast(
+        self, trend: str, ref_price: float
+    ) -> Optional[ForecastLevels]:
         """
-        Calculate forecast levels based on the current deviation memory.
+        Compute forecast levels for current trend.
 
-        Parameters:
-        • init_price : float
-            The trend's initial reference price.
-        • mem_deltas : list of float
-            The stored deviations (delta values).
+        Args:
+            trend: str
+                Current trend
+            ref_price: float
+                Reference price
 
         Returns:
-        A tuple (upper, mid, lower) representing forecasted price levels.
+            ForecastLevels if enough data available, None otherwise
         """
-        # Using numpy's percentile function for linear interpolation.
-        upper = init_price + np.percentile(mem_deltas, self.up_per)
-        mid = init_price + np.percentile(mem_deltas, self.mid_per)
-        lower = init_price + np.percentile(mem_deltas, self.dn_per)
-        return upper, mid, lower
+        if len(self.memory[trend]) < 3:  # Need minimum data points
+            return None
 
-    def compute(self, close_series: pd.Series):
+        deltas = np.array(self.memory[trend])
+
+        # Calculate forecast levels
+        upper = ref_price + np.percentile(deltas, self.params.up_percentile)
+        mid = ref_price + np.percentile(deltas, self.params.mid_percentile)
+        lower = ref_price + np.percentile(deltas, self.params.down_percentile)
+
+        # Calculate confidence based on memory size and consistency
+        memory_score = min(len(deltas) / self.params.max_memory, 1.0)
+        consistency = 1 - (np.std(deltas) / (upper - lower) if upper != lower else 0)
+        confidence = (memory_score + consistency) / 2
+
+        return ForecastLevels(upper=upper, mid=mid, lower=lower, confidence=confidence)
+
+    def compute(self, data: Union[pd.Series, pd.DataFrame]) -> MAResult:
         """
-        Process the close price series, compute the moving average,
-        and generate forecasted levels based on trend.
+        Compute moving average and generate forecasts.
 
-        Parameters:
-        • close_series : pd.Series
-            Price series (indexed by time).
+        Args:
+            data: Union[pd.Series, pd.DataFrame]
+                Price data. If DataFrame, uses column specified in params.price_column
 
         Returns:
-        • ma_series : pd.Series
-            The computed moving average.
-        • forecasts : list of dict
-            For each available index, returns a dictionary with:
-            {
-                'price': current price,
-                'trend': 'up' or 'down',
-                'forecast': { 'upper': float, 'mid': float, 'lower': float } or None
-            }
+            MAResult containing computed values
 
-        Note: Forecast values are computed only if enough data is available.
+        Raises:
+            ValueError: If input data is invalid
         """
-        ma_series = close_series.rolling(
-            window=self.window, min_periods=self.window
-        ).mean()
-        forecasts = []
+        try:
+            # Extract price series
+            if isinstance(data, pd.DataFrame):
+                if self.params.price_column not in data.columns:
+                    raise ValueError(
+                        f"Price column '{self.params.price_column}' not found"
+                    )
+                price_series = data[self.params.price_column]
+            else:
+                price_series = data
 
-        # Iterate over the series by index
-        for idx in range(len(close_series)):
-            price = close_series.iloc[idx]
-            current_ma = ma_series.iloc[idx]
-            forecast_levels = None
+            # Validate data
+            if len(price_series) < self.params.window:
+                raise ValueError(
+                    f"Insufficient data points. Need at least {self.params.window}"
+                )
 
-            if np.isnan(current_ma):
-                # Not enough data to compute the moving average yet
-                forecasts.append({"price": price, "trend": None, "forecast": None})
+            # Compute moving average
+            ma_series = self._compute_ma(price_series)
+
+            # Initialize result containers
+            trends = pd.Series(index=price_series.index, dtype=str)
+            forecasts = pd.DataFrame(
+                index=price_series.index,
+                columns=["upper", "mid", "lower", "confidence"],
+            )
+            signals = pd.Series(0, index=price_series.index)
+
+            # Process each point
+            for i in range(len(price_series)):
+                price = price_series.iloc[i]
+                ma = ma_series.iloc[i]
+
+                # Determine trend
+                current_trend = "up" if price > ma else "down"
+                trends.iloc[i] = current_trend
+
+                # Check for trend change
+                trend_changed = i > 0 and trends.iloc[i] != trends.iloc[i - 1]
+
+                if trend_changed:
+                    self.trend_prices[current_trend] = price
+                    self.memory[current_trend] = []
+
+                # Update memory
+                if not np.isnan(ma):
+                    ref_price = self.trend_prices[current_trend]
+                    if ref_price is not None:
+                        self._update_memory(current_trend, price, ref_price)
+
+                        # Generate forecast
+                        forecast = self._compute_forecast(current_trend, ref_price)
+                        if forecast:
+                            forecasts.iloc[i] = [
+                                forecast.upper,
+                                forecast.mid,
+                                forecast.lower,
+                                forecast.confidence,
+                            ]
+
+                            # Generate signals based on price position relative to forecast
+                            if current_trend == "up" and price >= forecast.upper:
+                                signals.iloc[i] = -1  # Sell signal
+                            elif current_trend == "down" and price <= forecast.lower:
+                                signals.iloc[i] = 1  # Buy signal
+
+            # Store results
+            self.results = MAResult(
+                ma=ma_series, trend=trends, forecasts=forecasts, signals=signals
+            )
+
+            return self.results
+
+        except Exception as e:
+            self.logger.error(f"Error computing Moving Average: {str(e)}")
+            raise
+
+    def get_current_state(self) -> Dict[str, float]:
+        """
+        Get current indicator state.
+
+        Returns:
+            Dict containing current MA value, trend, and forecast levels
+        """
+        if self.results is None:
+            raise ValueError("Moving Average not computed. Call compute() first.")
+
+        return {
+            "ma": float(self.results.ma.iloc[-1]),
+            "trend": self.results.trend.iloc[-1],
+            "forecast_upper": float(self.results.forecasts.iloc[-1]["upper"]),
+            "forecast_mid": float(self.results.forecasts.iloc[-1]["mid"]),
+            "forecast_lower": float(self.results.forecasts.iloc[-1]["lower"]),
+            "confidence": float(self.results.forecasts.iloc[-1]["confidence"]),
+        }
+
+    def plot(
+        self,
+        price_data: Optional[pd.Series] = None,
+        show_signals: bool = True,
+        show_forecasts: bool = True,
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
+        """
+        Plot Moving Average indicator with forecasts.
+
+        Args:
+            price_data: Optional[pd.Series]
+                Price data to plot
+            show_signals: bool
+                If True, shows trading signals
+            show_forecasts: bool
+                If True, shows forecast levels
+            save_path: Optional[str]
+                If provided, saves plot to this path
+            title: Optional[str]
+                Custom plot title
+        """
+        if self.results is None:
+            raise ValueError("Moving Average not computed. Call compute() first.")
+
+        try:
+            fig, ax = plt.subplots(figsize=(12, 8))
+
+            # Plot price and MA
+            if price_data is not None:
+                ax.plot(
+                    price_data.index,
+                    price_data,
+                    label="Price",
+                    color="black",
+                    linewidth=1,
+                )
+            ax.plot(
+                self.results.ma.index,
+                self.results.ma,
+                label=f"{self.params.ma_type.value.title()} MA ({self.params.window})",
+                color="blue",
+                linewidth=1.5,
+            )
+
+            # Plot forecasts if requested
+            if show_forecasts:
+                forecasts = self.results.forecasts
+
+                # Plot forecast levels with confidence-based alpha
+                for i in range(len(forecasts)):
+                    if not np.isnan(forecasts.iloc[i]["upper"]):
+                        confidence = forecasts.iloc[i]["confidence"]
+                        alpha = max(0.2, confidence)
+
+                        # Plot forecast ranges
+                        ax.fill_between(
+                            [forecasts.index[i]],
+                            [forecasts.iloc[i]["lower"]],
+                            [forecasts.iloc[i]["upper"]],
+                            color="gray",
+                            alpha=alpha * 0.3,
+                        )
+                        ax.plot(
+                            [forecasts.index[i]],
+                            [forecasts.iloc[i]["mid"]],
+                            color="orange",
+                            alpha=alpha,
+                            linestyle="--",
+                        )
+
+            # Plot signals if requested
+            if show_signals and price_data is not None:
+                signals = self.results.signals
+                buy_points = price_data[signals == 1]
+                sell_points = price_data[signals == -1]
+
+                ax.scatter(
+                    buy_points.index,
+                    buy_points,
+                    color="green",
+                    marker="^",
+                    s=100,
+                    label="Buy Signal",
+                )
+                ax.scatter(
+                    sell_points.index,
+                    sell_points,
+                    color="red",
+                    marker="v",
+                    s=100,
+                    label="Sell Signal",
+                )
+
+            # Customize plot
+            ax.set_title(
+                title
+                or f"Moving Average Forecast ({self.params.ma_type.value.title()})"
+            )
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+
+            plt.tight_layout()
+
+            if save_path:
+                plt.savefig(save_path, dpi=300, bbox_inches="tight")
+                plt.close()
+            else:
+                plt.show()
+
+        except Exception as e:
+            plt.close()
+            raise ValueError(f"Error plotting Moving Average: {str(e)}")
+
+
+if __name__ == "__main__":
+    """Example usage of the Moving Average indicator"""
+    try:
+        # Setup logging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+
+        # Create output directory
+        ma_output_dir = os.path.join(FIGURES_DIR, "moving_average")
+        os.makedirs(ma_output_dir, exist_ok=True)
+
+        # Process each ticker
+        for ticker in TICKERS:
+            try:
+                logger.info(f"Processing Moving Average for {ticker}")
+
+                # Load data
+                data_path = os.path.join(RAW_DATA_DIR, f"{ticker}_data.csv")
+                df = pd.read_csv(data_path)
+                df["Date"] = pd.to_datetime(df["Date"])
+                df.set_index("Date", inplace=True)
+
+                # Initialize indicator with custom parameters
+                params = MAParameters(
+                    window=20,
+                    ma_type=MAType.EXPONENTIAL,
+                    price_column="Close",
+                    max_memory=50,
+                    forecast_length=100,
+                    up_percentile=80,
+                    mid_percentile=50,
+                    down_percentile=20,
+                    signal_threshold=0.02,
+                )
+                ma_indicator = MovingAverageForecast(params)
+
+                # Compute indicator
+                results = ma_indicator.compute(df)
+
+                # Get current state
+                current_state = ma_indicator.get_current_state()
+                logger.info(
+                    f"{ticker} current MA: {current_state['ma']:.2f} "
+                    f"(Trend: {current_state['trend']}, "
+                    f"Confidence: {current_state['confidence']:.2%})"
+                )
+
+                # Plot indicator
+                save_path = os.path.join(ma_output_dir, f"{ticker}_ma.png")
+                ma_indicator.plot(
+                    price_data=df["Close"],
+                    show_signals=True,
+                    show_forecasts=True,
+                    save_path=save_path,
+                    title=f"Moving Average Forecast - {ticker}",
+                )
+
+                logger.info(f"Moving Average plot saved for {ticker}")
+
+            except Exception as e:
+                logger.error(f"Error processing {ticker}: {str(e)}")
                 continue
 
-            # Determine trend: uptrend if price > MA, else downtrend
-            if price > current_ma:
-                trend = "up"
-                # Set reference if the trend just started
-                if self.uptrend_init_price is None or (
-                    idx > 0 and close_series.iloc[idx - 1] <= ma_series.iloc[idx - 1]
-                ):
-                    self.uptrend_init_price = price
-                    # Clear previous memory for a fresh trend
-                    self.memory["up"] = []
-                mem = self._update_memory("up", price, self.uptrend_init_price)
-                if len(mem) >= 1:  # Only forecast if there is memory available
-                    upper, mid, lower = self._compute_forecast_levels(
-                        self.uptrend_init_price, mem
-                    )
-                    forecast_levels = {"upper": upper, "mid": mid, "lower": lower}
-                else:
-                    forecast_levels = {"upper": None, "mid": None, "lower": None}
-            else:
-                trend = "down"
-                if self.downtrend_init_price is None or (
-                    idx > 0 and close_series.iloc[idx - 1] >= ma_series.iloc[idx - 1]
-                ):
-                    self.downtrend_init_price = price
-                    self.memory["down"] = []
-                mem = self._update_memory("down", price, self.downtrend_init_price)
-                if len(mem) >= 1:
-                    upper, mid, lower = self._compute_forecast_levels(
-                        self.downtrend_init_price, mem
-                    )
-                    forecast_levels = {"upper": upper, "mid": mid, "lower": lower}
-                else:
-                    forecast_levels = {"upper": None, "mid": None, "lower": None}
-
-            forecasts.append(
-                {"price": price, "trend": trend, "forecast": forecast_levels}
-            )
-
-        return ma_series, forecasts
-
-    def plot_and_save(
-        self,
-        close_series: pd.Series,
-        ma_series: pd.Series,
-        forecasts: list,
-        filename="moving_average_forecast.png",
-    ):
-        """
-        Plot the price series, moving average, and forecast levels, then save the plot to a file.
-
-        Parameters:
-        • close_series : pd.Series
-            Original price series.
-        • ma_series : pd.Series
-            Moving average computed from the price series.
-        • forecasts : list of dict
-            Forecast results generated from the compute method.
-        • filename : str
-            The name of the file to save the plot.
-        """
-        # Prepare arrays for forecast levels
-        upper_forecast = []
-        mid_forecast = []
-        lower_forecast = []
-
-        # Iterate through forecasts to extract forecast levels
-        for forecast in forecasts:
-            if forecast["forecast"] is None or forecast["forecast"]["upper"] is None:
-                upper_forecast.append(np.nan)
-                mid_forecast.append(np.nan)
-                lower_forecast.append(np.nan)
-            else:
-                upper_forecast.append(forecast["forecast"]["upper"])
-                mid_forecast.append(forecast["forecast"]["mid"])
-                lower_forecast.append(forecast["forecast"]["lower"])
-
-        # Create the plot
-        plt.figure(figsize=(12, 6))
-        plt.plot(
-            close_series.index,
-            close_series.values,
-            label="Price",
-            color="black",
-            linewidth=1.5,
-        )
-        plt.plot(
-            ma_series.index,
-            ma_series.values,
-            label=f"MA (window={self.window})",
-            color="blue",
-            linestyle="--",
-        )
-        plt.plot(
-            close_series.index,
-            upper_forecast,
-            label="Forecast Upper",
-            color="green",
-            linestyle=":",
-        )
-        plt.plot(
-            close_series.index,
-            mid_forecast,
-            label="Forecast Mid",
-            color="orange",
-            linestyle="-.",
-        )
-        plt.plot(
-            close_series.index,
-            lower_forecast,
-            label="Forecast Lower",
-            color="red",
-            linestyle=":",
-        )
-
-        plt.title("Moving Average Forecast")
-        plt.xlabel("Date")
-        plt.ylabel("Price")
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-
-        # Save the plot to a file
-        plt.savefig(filename)
-        plt.close()
-        print(f"Plot saved as {filename}")
-
-
-# -----------------------
-# Example usage:
-# -----------------------
-if __name__ == "__main__":
-    # For demonstration, generate a random price series using a simple random walk.
-    try:
-        for ticker in TICKERS:
-            prices = pd.read_csv(f"{RAW_DATA_DIR}/{ticker}_data.csv")["Close"]
-
-            # dates = pd.date_range(start="2023-01-01", periods=200, freq="D")
-            # prices = pd.Series(np.cumsum(np.random.randn(200)) + 100, index=dates)
-
-            # Instantiate the Moving Average Forecast indicator.
-            ma_forecaster = MovingAverageForecast(
-                window=20,
-                max_memory=50,
-                forecast_length=100,
-                up_per=80,
-                mid_per=50,
-                dn_per=20,
-            )
-
-            ma_series, forecasts = ma_forecaster.compute(prices)
-
-            if not os.path.exists(f"{FIGURES_DIR}/moving_avg"):
-                os.makedirs(f"{FIGURES_DIR}/moving_avg")
-
-            # Plot and save the result to a file.
-            ma_forecaster.plot_and_save(
-                prices,
-                ma_series,
-                forecasts,
-                filename=f"{FIGURES_DIR}/moving_avg/{ticker}_moving_average_forecast.png",
-            )
     except Exception as e:
-        print(f"Error: {e}")
-
-    # Print sample output (last 5 data points)
-    # for ts, forecast in list(zip(prices.index, forecasts))[-5:]:
-    #     print(f"{ts.date()} | Price: {forecast['price']:.2f} | "
-    #           f"Trend: {forecast['trend']} | Forecast: {forecast['forecast']}")
+        logger.error(f"Error in main execution: {str(e)}")

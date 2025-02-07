@@ -26,7 +26,7 @@ FUNDAMENTAL_DATA_DIR = CACHE_DIR / "fundamental_data"
 NEWS_DATA_DIR = CACHE_DIR / "news_data"
 
 # Processing
-OUTPUT_DIR = DATA_DIR / "processed"
+# OUTPUT_DIR = DATA_DIR / "processed"
 PROCESSED_DATA_DIR = CACHE_DIR / "compiled"
 # OUTPUT_MARKET_DATA_DIR = OUTPUT_DIR / "market_data"
 # OUTPUT_FUNDAMENTAL_DATA_DIR = OUTPUT_DIR / "fundamental_data"
@@ -114,7 +114,7 @@ for directory in [
     DATA_DIR,
     CACHE_DIR,
     FIGURES_DIR,
-    OUTPUT_DIR,
+    # OUTPUT_DIR,
     MARKET_DATA_DIR,
     FUNDAMENTAL_DATA_DIR,
     NEWS_DATA_DIR,
