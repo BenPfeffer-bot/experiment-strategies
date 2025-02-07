@@ -51,3 +51,11 @@ project/
 ├── setup.py                     # for installation as a package if desired
 └── README.md                    # project overview, usage instructions, and design rationale
 ```
+
+Roadmap
+data -> indicators -> strategies -> models (ML & RL) -> backtesting -> execution
+
+
+
+
+
