@@ -322,10 +322,10 @@ class FibonacciTrailingStop:
                             self.pivots.insert(
                                 0, Pivot(pivot_bar, pivot_price, 1, strength)
                             )
-                    else:
-                        self.pivots.insert(
-                            0, Pivot(pivot_bar, pivot_price, 1, strength)
-                        )
+                        else:
+                            self.pivots.insert(
+                                0, Pivot(pivot_bar, pivot_price, 1, strength)
+                            )
 
                     pivot_points[pivot_bar] = pivot_price
 
@@ -348,10 +348,10 @@ class FibonacciTrailingStop:
                             self.pivots.insert(
                                 0, Pivot(pivot_bar, pivot_price, -1, strength)
                             )
-                    else:
-                        self.pivots.insert(
-                            0, Pivot(pivot_bar, pivot_price, -1, strength)
-                        )
+                        else:
+                            self.pivots.insert(
+                                0, Pivot(pivot_bar, pivot_price, -1, strength)
+                            )
 
                     pivot_points[pivot_bar] = pivot_price
 

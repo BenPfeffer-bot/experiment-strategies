@@ -17,7 +17,7 @@ import yfinance as yf
 
 from src.utils.config import (
     CACHE_DIR,
-    OUTPUT_DIR,
+    # OUTPUT_DIR,
     TICKERS,
     MARKET_DATA_DIR,
     RAW_DATA_DIR,
@@ -58,7 +58,7 @@ class FetchData:
             retry_delay (int, optional): Delay between retries in seconds. Defaults to 5.
         """
         self.cache_dir: Path = cache_dir if cache_dir else CACHE_DIR
-        self.output_dir: Path = output_dir if output_dir else OUTPUT_DIR
+        # self.output_dir: Path = output_dir if output_dir else OUTPUT_DIR
         self.market_data_dir: Path = (
             market_data_dir if market_data_dir else MARKET_DATA_DIR
         )
@@ -219,7 +219,7 @@ if __name__ == "__main__":
     # We can now loop through the list of tickers and fetch the data for each ticker
     # We ensure its saved in the cache directory
     for ticker in TICKERS:
-        loader = FetchData(ticker=ticker, period="5y", interval="1d")
+        loader = FetchData(ticker=ticker, period="2y", interval="1d")
         try:
             data = loader.fetch_data()
             print(data.head())

@@ -246,16 +246,16 @@ class PBVIndicator:
         self, pbv: np.ndarray, growth_rates: np.ndarray
     ) -> np.ndarray:
         """
-        Calculate growth-adjusted PBV.
+                Calculate growth-adjusted PBV.
 
-        Args:
-            pbv: np.ndarray
-                PBV ratios
-            growth_rates: np.ndarray
-                Earnings growth rates
+                Args:
+                    pbv: np.ndarray
+                        PBV ratios
+                    growth_rates: np.ndarray
+                        Earnings growth rates
 
         Returns:
-            np.ndarray of adjusted PBV ratios
+                    np.ndarray of adjusted PBV ratios
         """
         # Add small constant to avoid division by zero
         growth_factor = 1 + np.maximum(growth_rates, -0.99)
@@ -595,7 +595,6 @@ class PBVIndicator:
                 plt.show()
 
         except Exception as e:
-            plt.close()
             raise ValueError(f"Error plotting PBV: {str(e)}")
 
 
